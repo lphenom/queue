@@ -1,0 +1,11 @@
+/vendor/
+/coverage/
+/.php-cs-fixer.cache
+/.phpunit.cache
+/.phpunit.result.cache
+/lphenom-queue.phar
+/kphp-out/
+/composer.lock
+/composer.phar
+/.idea/
+/.vscode/
