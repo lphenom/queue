@@ -55,7 +55,7 @@ $queue = new DbQueue(
 );
 ```
 
-#### Redis Queue (Production)
+#### Redis Queue (Production / KPHP)
 
 ```php
 use LPhenom\Redis\Client\RespRedisClient;
@@ -73,53 +73,127 @@ $queue = new RedisQueue(
 );
 ```
 
-### 3. Push a Job
+---
+
+## Producer / Consumer Pattern
+
+### Producer — отправка задачи в очередь
+
+Продюсер создаёт `Job` и вызывает `push()`. Одинаково для DB и Redis:
 
 ```php
+use LPhenom\Queue\Job;
+
+$job = Job::create('send_email', json_encode(['to' => 'user@example.com']));
 $queue->push($job);
 ```
 
-### 4. Process Jobs
+### Consumer — обработка задач через Worker
 
-#### Polling (DB / Cron)
-
-```php
-while (true) {
-    $job = $queue->reserve(0); // non-blocking for DB driver
-
-    if ($job === null) {
-        sleep(1); // wait before polling again
-        continue;
-    }
-
-    try {
-        processJob($job);
-        $queue->ack($job);
-    } catch (\Throwable $e) {
-        $queue->fail($job, $e->getMessage());
-    }
-}
-```
-
-#### Reactive (Redis / Long-running Worker)
+Консьюмер реализует `JobHandlerInterface` для каждого типа задачи и запускает `Worker`:
 
 ```php
-while (true) {
-    // Blocks up to 5 seconds waiting for a job
-    $job = $queue->reserve(5);
+use LPhenom\Queue\Job;
+use LPhenom\Queue\JobHandlerInterface;
+use LPhenom\Queue\Worker;
 
-    if ($job === null) {
-        continue; // timeout — loop again
-    }
-
-    try {
-        processJob($job);
-        $queue->ack($job);
-    } catch (\Throwable $e) {
-        $queue->fail($job, $e->getMessage());
+// 1. Реализуй обработчик для каждого типа джоба
+final class SendEmailHandler implements JobHandlerInterface
+{
+    public function handle(Job $job): void
+    {
+        $payload = json_decode($job->getPayloadJson(), true);
+        $to = is_array($payload) ? (string)($payload['to'] ?? '') : '';
+        // ... отправь письмо ...
+        echo 'Email sent to: ' . $to . PHP_EOL;
     }
 }
+
+final class GenerateReportHandler implements JobHandlerInterface
+{
+    public function handle(Job $job): void
+    {
+        // ... генерируй отчёт ...
+    }
+}
+
+// 2. Собери Worker
+$worker = new Worker($queue);
+$worker->register('send_email',    new SendEmailHandler());
+$worker->register('generate_report', new GenerateReportHandler());
+
+// 3. Запусти consumer-loop
+$worker->run();  // блокирует навсегда (Redis BLPOP) или поллит (DB)
 ```
+
+### Dispatch flow
+
+```
+Producer                 Queue (Redis/DB)          Consumer (Worker)
+   │                          │                          │
+   │  push(Job('send_email')) │                          │
+   │─────────────────────────>│                          │
+   │                          │                          │
+   │                          │   reserve()              │
+   │                          │<─────────────────────────│
+   │                          │   Job('send_email')      │
+   │                          │─────────────────────────>│
+   │                          │                          │
+   │                          │          handler->handle(job)
+   │                          │                          │
+   │                          │   ack(job)  [success]    │
+   │                          │<─────────────────────────│
+   │                          │          OR              │
+   │                          │   fail(job) [exception]  │
+   │                          │<─────────────────────────│
+   │                          │   (retry policy applied) │
+```
+
+### Режим cron (DbQueue — shared hosting)
+
+`DbQueue::reserve()` не блокирует. Для DB-очереди запускай `runOnce()` из cron:
+
+```php
+// worker-cron.php — запускается каждую минуту через cron
+$worker = new Worker($queue);
+$worker->register('send_email', new SendEmailHandler());
+
+// Обрабатывает не более 10 задач за один запуск, не блокирует
+$worker->run(0, 10);
+```
+
+```crontab
+* * * * * php /app/worker-cron.php
+```
+
+### Режим daemon (RedisQueue — KPHP / production)
+
+`RedisQueue::reserve()` использует **BLPOP** — блокирует до появления задачи.
+Запускай как долгоживущий процесс:
+
+```php
+// worker.php — запускается как systemd/supervisor сервис
+$worker = new Worker($queue);
+$worker->register('send_email',      new SendEmailHandler());
+$worker->register('generate_report', new GenerateReportHandler());
+
+// Блокирует и обрабатывает задачи реактивно (без поллинга)
+// Перезапускается через supervisor после каждых 1000 задач (ограничение памяти)
+$worker->run(5, 1000);
+```
+
+### Что происходит при ошибке в handler
+
+Если `handle()` выбросит исключение:
+1. `Worker` перехватывает его
+2. Вызывается `$queue->fail($job, $exception->getMessage())`
+3. Драйвер применяет `RetryPolicy`:
+   - если `attempts < maxAttempts` → джоб возвращается в очередь с задержкой (exponential backoff)
+   - если `attempts >= maxAttempts` → джоб удаляется навсегда
+
+Если для `job.name` не зарегистрирован handler → `fail()` вызывается сразу (без повторов).
+
+---
 
 ## QueueInterface
 

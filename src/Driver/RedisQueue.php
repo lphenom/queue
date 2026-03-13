@@ -155,7 +155,6 @@ final class RedisQueue implements QueueInterface
             throw new QueueException('Failed to deserialize job: invalid JSON payload');
         }
 
-        /** @var array<string, mixed> $data */
         $idRaw          = $data['id'] ?? null;
         $nameRaw        = $data['name'] ?? null;
         $payloadRaw     = $data['payload_json'] ?? null;
