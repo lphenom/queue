@@ -9,26 +9,27 @@ declare(strict_types=1);
  * All source files must be explicitly required in dependency order:
  *   External interfaces → Queue exceptions → Queue DTO → Queue interfaces → Drivers
  *
- * NOTE: In Dockerfile.check (kphp-build stage), KPHP-compatible stubs from
- * build/kphp-stubs/db/ are copied over the incompatible vendor files before
- * KPHP compilation. This ensures:
- *   - vendor/lphenom/db/src/Param/Param.php has no union types / constructor promotion
- *   - vendor/lphenom/db/src/Contract/ConnectionInterface.php has no callable params
+ * Dependency versions required: lphenom/db ^0.3, lphenom/redis ^0.3
+ * Both are KPHP-compatible as of v0.3 — no stubs needed.
  *
  * Compatible with PHP 8.1+ and KPHP.
  *
  * @lphenom-build kphp
  */
 
-// ── lphenom/db: contracts and value objects ───────────────────────────────
-// In KPHP build: these files are replaced with KPHP-compatible stubs
-// (see Dockerfile.check kphp-build stage)
+// ── lphenom/db v0.3: contracts and value objects (KPHP-compatible) ────────
+// ResultInterface has no dependencies — include first
 require_once __DIR__ . '/../vendor/lphenom/db/src/Contract/ResultInterface.php';
+// ConnectionInterface depends on ResultInterface and TransactionCallbackInterface
 require_once __DIR__ . '/../vendor/lphenom/db/src/Contract/ConnectionInterface.php';
+// TransactionCallbackInterface references ConnectionInterface
+require_once __DIR__ . '/../vendor/lphenom/db/src/Contract/TransactionCallbackInterface.php';
+// Param — KPHP-compatible since v0.3 (string $value, explicit fields, no union types)
 require_once __DIR__ . '/../vendor/lphenom/db/src/Param/Param.php';
+// ParamBinder — factory for Param instances
 require_once __DIR__ . '/../vendor/lphenom/db/src/Param/ParamBinder.php';
 
-// ── lphenom/redis: pipeline + client (vendor is KPHP-compatible as-is) ───
+// ── lphenom/redis v0.3: pipeline + client (KPHP-compatible) ──────────────
 require_once __DIR__ . '/../vendor/lphenom/redis/src/Pipeline/RedisPipelineDriverInterface.php';
 require_once __DIR__ . '/../vendor/lphenom/redis/src/Pipeline/RedisPipeline.php';
 require_once __DIR__ . '/../vendor/lphenom/redis/src/Client/RedisClientInterface.php';

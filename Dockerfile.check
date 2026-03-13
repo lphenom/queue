@@ -1,43 +1,68 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Dockerfile.check — KPHP binary build + PHAR verification
 #
-# Stage 0: vendor-install   — copies pre-installed vendor from build context
-# Stage 1: kphp-build       — KPHP compile + binary smoke-test
-# Stage 2: phar-build       — PHAR build + smoke-test
+# Stage 0: vendor-install   — ONE composer install --no-dev (inside Docker, GitHub auth here)
+# Stage 1: kphp-build       — KPHP compile + binary smoke-test (vendor from stage 0)
+# Stage 2: phar-build       — PHAR build + smoke-test (src/ only, no vendor needed)
 # Stage 3: check-complete   — proves both stages completed
 #
-# PREREQUISITES:
-#   Run `composer install --no-dev` locally before building this image.
-#   In CI this is done by the `kphp-check` job after the `test` job.
+# GitHub authentication — applies to stage 0 only (choose one):
+#   1. SSH agent forwarding:  docker build --ssh default -f Dockerfile.check .
+#   2. GitHub OAuth token:    docker build --build-arg GITHUB_TOKEN=ghp_... -f Dockerfile.check .
 #
 # Usage:
-#   composer install --no-dev
-#   docker build -f Dockerfile.check -t lphenom-queue-check .
+#   docker build --ssh default -f Dockerfile.check -t lphenom-queue-check .
+#   # or with token:
+#   docker build --build-arg GITHUB_TOKEN=ghp_XXX -f Dockerfile.check -t lphenom-queue-check .
 #
 # Both build stages must succeed (exit 0) for the check to pass.
 # =============================================================================
 
+# Optional GitHub OAuth token (alternative to SSH agent forwarding)
+ARG GITHUB_TOKEN=""
+
 # -----------------------------------------------------------------------------
-# Stage 0: Prepare vendor directory
-# Copies the pre-installed vendor/ from the build context.
-# This avoids the need for GitHub SSH keys or tokens inside Docker.
+# Stage 0: Install production dependencies inside Docker.
+# Single source of GitHub authentication for the entire build.
+# Supports SSH agent forwarding (--ssh default) AND GitHub OAuth token.
+# lphenom/db ^0.3 and lphenom/redis ^0.3 are KPHP-compatible — no stubs needed.
 # -----------------------------------------------------------------------------
 FROM php:8.1.31-cli AS vendor-install
 
+ARG GITHUB_TOKEN=""
+
 WORKDIR /build
 
-COPY src/          ./src/
-COPY build/        ./build/
-COPY composer.json ./composer.json
-# vendor/ must be pre-installed before running docker build
-# run: composer install --no-dev --optimize-autoloader
-COPY vendor/       ./vendor/
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends git unzip openssh-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /root/.ssh \
+    && ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null || true
+
+COPY --from=composer:2.9.5 /usr/bin/composer /usr/bin/composer
+
+COPY composer.json composer.lock* ./
+
+# Install production dependencies.
+# Authentication methods (in order of precedence):
+#   1. GITHUB_TOKEN build arg — sets COMPOSER_AUTH for GitHub OAuth
+#   2. --ssh default          — mounts SSH agent for git@github.com: URLs
+RUN --mount=type=ssh,required=false \
+    if [ -n "${GITHUB_TOKEN}" ]; then \
+        export COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"${GITHUB_TOKEN}\"}}"; \
+    fi \
+    && composer install \
+        --no-dev \
+        --no-progress \
+        --prefer-dist \
+        --optimize-autoloader \
+        --no-interaction
 
 # -----------------------------------------------------------------------------
 # Stage 1: KPHP binary build
-# Uses the official vkcom/kphp image (Ubuntu 20.04 focal).
-# KPHP parses PHP source and compiles to a static C++ binary.
-# PHP 8.1-vkext is installed optionally for dev tooling stubs.
+# Uses vkcom/kphp (Ubuntu 20.04 focal).
+# lphenom/db ^0.3 and lphenom/redis ^0.3 are KPHP-compatible — no stubs needed.
 # -----------------------------------------------------------------------------
 FROM vkcom/kphp:latest AS kphp-build
 
@@ -58,25 +83,11 @@ WORKDIR /build
 
 COPY src/    ./src/
 COPY build/  ./build/
-# Copy vendor from stage 0 so KPHP can resolve dependency interfaces
+# Copy production vendor from stage 0 (v0.3 is KPHP-compatible, no stubs needed)
 COPY --from=vendor-install /build/vendor/ ./vendor/
 
-# Override incompatible vendor files with KPHP-compatible stubs.
-# The installed lphenom/db uses constructor property promotion + readonly +
-# int|string|bool|float|null union types — all unsupported by KPHP.
-# We replace only the files directly used by lphenom/queue.
-RUN cp /build/build/kphp-stubs/db/Contract/ResultInterface.php \
-       /build/vendor/lphenom/db/src/Contract/ResultInterface.php \
-    && cp /build/build/kphp-stubs/db/Contract/ConnectionInterface.php \
-       /build/vendor/lphenom/db/src/Contract/ConnectionInterface.php \
-    && cp /build/build/kphp-stubs/db/Param/Param.php \
-       /build/vendor/lphenom/db/src/Param/Param.php \
-    && cp /build/build/kphp-stubs/db/Param/ParamBinder.php \
-       /build/vendor/lphenom/db/src/Param/ParamBinder.php \
-    && echo "=== vendor stubs applied ==="
-
-# Compile to CLI binary
-# kphp exits non-zero on any compilation error → fails the Docker build
+# Compile to CLI binary.
+# kphp exits non-zero on any compilation error → fails the Docker build.
 RUN kphp \
         -d /build/kphp-out \
         -M cli \
@@ -84,31 +95,34 @@ RUN kphp \
     && echo "=== KPHP compilation: OK ===" \
     && ls -lh /build/kphp-out/
 
-# Run the compiled binary to verify it executes correctly
-# KPHP CLI binaries refuse to run as root — create a test user
+# Run the compiled binary to verify it executes correctly.
+# KPHP CLI binaries refuse to run as root — create a test user.
 RUN useradd -m kphp-runner \
     && su kphp-runner -c '/build/kphp-out/cli' \
     && echo "=== KPHP binary run: OK ==="
 
 # -----------------------------------------------------------------------------
-# Stage 2: PHAR (shared-hosting) build
-# Uses PHP 8.1 with phar.readonly=0.
+# Stage 2: PHAR (shared-hosting) build.
+# Library PHAR contains only src/ — vendor is NOT bundled and NOT needed here.
+# build-phar.php packs src/ only; smoke-test exercises Job, RetryPolicy,
+# DbSchema and QueueException — all self-contained (no lphenom/db or lphenom/redis).
+# No composer, no GitHub auth — fast and hermetic.
 # -----------------------------------------------------------------------------
 FROM php:8.1.31-cli AS phar-build
 
 WORKDIR /build
 
-# phar.readonly must be Off to allow creating PHAR archives
 RUN echo "phar.readonly = Off" > /usr/local/etc/php/conf.d/phar.ini
 
-# Only need src/ and build/ — this is a library PHAR (no vendor bundled)
-COPY src/   ./src/
-COPY build/ ./build/
+COPY src/    ./src/
+COPY build/  ./build/
 
-# Build the PHAR archive (src/ only, no vendor)
+# Build the PHAR archive (src/ + inline PSR-4 autoloader stub)
 RUN php -d phar.readonly=0 /build/build/build-phar.php
 
-# Smoke-test: load the PHAR and verify autoloading works
+# Smoke-test: load the PHAR and verify autoloading works.
+# Non-driver classes only (Job, RetryPolicy, DbSchema, QueueException) —
+# no external dependencies, no vendor required.
 RUN php /build/build/smoke-test-phar.php /build/lphenom-queue.phar \
     && echo "=== PHAR smoke-test: OK ==="
 
@@ -118,6 +132,4 @@ RUN php /build/build/smoke-test-phar.php /build/lphenom-queue.phar \
 FROM scratch AS check-complete
 COPY --from=kphp-build /build/kphp-out/cli          /kphp-cli-binary
 COPY --from=phar-build /build/lphenom-queue.phar     /lphenom-queue.phar
-
-
 
