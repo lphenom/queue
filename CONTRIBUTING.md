@@ -1,68 +1,73 @@
-# Contributing to lphenom/queue
+# Участие в разработке lphenom/queue
 
-Thank you for your interest in contributing! 🎉
+Спасибо за интерес к проекту! 🎉
 
-## Getting Started
+## Требования
+
+- PHP >= 8.1
+- Docker + Docker Compose (для запуска тестов с сервисами)
+- Composer
+
+## Настройка окружения
 
 ```bash
 git clone git@github.com:lphenom/queue.git
 cd queue
-make install
+composer install
+
+# Запуск тестов
+make test
 ```
 
-## Development Environment
+## Стиль кода
 
-All tools run inside Docker — no local PHP/Composer required:
+PSR-12. Автоисправление:
 
 ```bash
-make up        # Start MySQL + Redis
-make install   # Install composer dependencies
-make test      # Run PHPUnit tests
-make lint      # Check code style
-make lint-fix  # Auto-fix code style
-make analyse   # PHPStan static analysis
-make check     # lint + analyse + test
-make kphp-check # KPHP binary build + PHAR verification
+make lint-fix
 ```
 
-## Code Standards
+Проверка:
 
-- PHP >= 8.1
-- `declare(strict_types=1);` in every file
-- **KPHP-compatible** — see [docs/kphp-compatibility.md](docs/kphp-compatibility.md)
-  - No `str_starts_with()` / `str_ends_with()` / `str_contains()`
-  - No `JSON_THROW_ON_ERROR`
-  - No `readonly` properties
-  - No constructor property promotion
-  - No `match` expressions (use `if/elseif`)
-  - No `callable` in typed arrays
-  - No trailing commas in function call argument lists
-  - No `__destruct()`
-- PSR-12 code style
-- PHPStan level 8
-
-## Commits
-
-Small, focused commits. Conventional commit format:
-
-```
-feat(queue): add redis queue driver
-fix(queue): handle blpop timeout correctly
-test(queue): add retry policy edge cases
-docs(queue): update queue.md with examples
-chore: bump phpunit to 10.5
+```bash
+make lint
 ```
 
-## Pull Requests
+## Статический анализ
 
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Make small commits
-4. Ensure `make check` passes
-5. Ensure `make kphp-check` passes
-6. Open a PR against `main`
+```bash
+make analyse   # PHPStan level 8
+```
 
-## Questions
+## Совместимость с KPHP
 
-Open a GitHub Discussion or email popkovd.o@yandex.ru.
+Весь код **обязан** оставаться KPHP-совместимым. Правила:
 
+- Нет constructor property promotion (`__construct(private $x)`)
+- Нет `readonly` свойств
+- Нет `Reflection`, `eval()`, `$$var`, `new $className()`
+- Нет `str_starts_with`, `str_ends_with`, `str_contains` — используйте `substr`/`strpos`
+- `try/catch` всегда с явным `catch`
+- Нет `callable` в типизированных массивах
+
+## Сообщения коммитов
+
+Следуйте [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat(queue): добавить поддержку TTL
+fix(queue): исправить обработку пустого ключа
+test(queue): добавить интеграционный тест
+```
+
+## Чеклист Pull Request
+
+- [ ] Тесты проходят: `make test`
+- [ ] Нет ошибок линтера: `make lint`
+- [ ] PHPStan проходит: `make analyse`
+- [ ] KPHP-совместимо (нет запрещённых конструкций)
+- [ ] Документация обновлена при изменении публичного API
+
+## Лицензия
+
+Участвуя в проекте, вы соглашаетесь, что ваши изменения будут лицензированы под [MIT License](LICENSE).

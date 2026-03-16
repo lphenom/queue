@@ -1,6 +1,7 @@
 {
     "name": "lphenom/queue",
     "description": "LPhenom queue package — DB and Redis queue drivers with retry policy, KPHP-compatible",
+    "version": "0.1.0",
     "type": "library",
     "license": "MIT",
     "keywords": ["queue", "lphenom", "kphp", "jobs", "retry"],
@@ -13,8 +14,8 @@
     ],
     "require": {
         "php": ">=8.1",
-        "lphenom/db": "^0.3",
-        "lphenom/redis": "^0.3"
+        "lphenom/db": "^0.1.0",
+        "lphenom/redis": "^0.1.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.5",

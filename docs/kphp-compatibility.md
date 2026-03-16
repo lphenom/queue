@@ -1,74 +1,74 @@
-# KPHP Compatibility — lphenom/queue
+# Совместимость с KPHP — lphenom/queue
 
-This document describes all KPHP constraints and solutions applied in the `lphenom/queue` package.
+Этот документ описывает все ограничения и решения, применённые в пакете `lphenom/queue` для совместимости с KPHP.
 
-For the full LPhenom KPHP compatibility guide, see [lphenom/core kphp-compatibility.md](https://github.com/lphenom/core/blob/main/docs/kphp-compatibility.md).
-
----
-
-## How KPHP Compilation Works
-
-KPHP (`vkcom/kphp`) compiles PHP source to a static C++ binary. At compile time:
-- KPHP has its own PHP parser — it does **not** use the PHP runtime
-- All types must be statically resolvable (no `mixed` in method calls without `instance_cast`)
-- The compiled binary runs **without PHP** installed
+Полное руководство по совместимости с KPHP для LPhenom: [lphenom/core kphp-compatibility.md](https://github.com/lphenom/core/blob/main/docs/kphp-compatibility.md).
 
 ---
 
-## Rules Applied in This Package
+## Как работает компиляция KPHP
 
-### ❌ No `str_starts_with()` / `str_ends_with()` / `str_contains()`
+KPHP (`vkcom/kphp`) компилирует PHP-код в статический C++-бинарь. При компиляции:
+- KPHP имеет собственный PHP-парсер — **не использует** PHP runtime
+- Все типы должны быть статически выводимы (нельзя вызывать методы на `mixed` без `instance_cast`)
+- Скомпилированный бинарь работает **без установленного PHP**
 
-Not supported in KPHP. Use `substr()` / `strpos()`:
+---
+
+## Правила, применённые в этом пакете
+
+### ❌ Нет `str_starts_with()` / `str_ends_with()` / `str_contains()`
+
+Не поддерживается в KPHP. Используйте `substr()` / `strpos()`:
 
 ```php
-// ❌ KPHP rejects
+// ❌ KPHP отклоняет
 if (str_starts_with($key, 'queue:')) { ... }
 
-// ✅ KPHP-safe
+// ✅ KPHP-совместимо
 if (substr($key, 0, 6) === 'queue:') { ... }
 ```
 
-### ❌ No `JSON_THROW_ON_ERROR`
+### ❌ Нет `JSON_THROW_ON_ERROR`
 
-Not supported. Check return value explicitly:
+Не поддерживается. Проверяйте возвращаемое значение явно:
 
 ```php
-// ❌ KPHP rejects
+// ❌ KPHP отклоняет
 $data = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
 
-// ✅ KPHP-safe
+// ✅ KPHP-совместимо
 $data = json_decode($value, true);
 if (!is_array($data)) {
-    throw new QueueException('Invalid JSON');
+    throw new QueueException('Некорректный JSON');
 }
 ```
 
-### ❌ No `json_encode(array<string, mixed>)` — uses string concatenation
+### ❌ Нет `json_encode(array<string, mixed>)` — используем конкатенацию строк
 
-KPHP's type inference can struggle with `array<string, mixed>` in `json_encode()`.
-`RedisQueue::serialize()` builds JSON via string concatenation to avoid this:
+Вывод типов KPHP может не справиться с `array<string, mixed>` в `json_encode()`.
+`RedisQueue::serialize()` строит JSON через конкатенацию строк для избежания этой проблемы:
 
 ```php
-// ❌ Potential KPHP type inference issue
+// ❌ Потенциальная проблема вывода типов KPHP
 $json = json_encode(['id' => $id, 'attempts' => $attempts]);
 
-// ✅ KPHP-safe: unambiguous types per field
+// ✅ KPHP-совместимо: однозначные типы для каждого поля
 $json = '{"id":' . json_encode($id)
     . ',"attempts":' . $attempts
     . '}';
 ```
 
-### ❌ No `pow()` for exponential backoff
+### ❌ Нет `pow()` для экспоненциального backoff
 
-`pow()` returns `float`, which causes KPHP type inference issues when used as `int`.
-`RetryPolicy` uses an integer multiplication loop:
+`pow()` возвращает `float`, что вызывает проблемы вывода типов KPHP при использовании как `int`.
+`RetryPolicy` использует целочисленный цикл умножения:
 
 ```php
-// ❌ pow() returns float
+// ❌ pow() возвращает float
 $delay = (int) pow(2, $attempts) * $base;
 
-// ✅ Pure integer arithmetic
+// ✅ Чистая целочисленная арифметика
 $delay = $base;
 $i     = 0;
 while ($i < $attempts) {
@@ -77,17 +77,17 @@ while ($i < $attempts) {
 }
 ```
 
-### ❌ No `readonly` properties
+### ❌ Нет `readonly`-свойств
 
 ```php
-// ❌ KPHP rejects
+// ❌ KPHP отклоняет
 final class Job {
     public function __construct(
         private readonly string $id
     ) {}
 }
 
-// ✅ Explicit declaration + assignment
+// ✅ Явное объявление + присваивание
 final class Job {
     private string $id;
 
@@ -97,14 +97,14 @@ final class Job {
 }
 ```
 
-### ❌ No constructor property promotion
+### ❌ Нет constructor property promotion
 
-See above. All properties declared explicitly in class body and assigned in constructor body.
+См. выше. Все свойства объявляются явно в теле класса и присваиваются в теле конструктора.
 
-### ❌ No `match` expressions
+### ❌ Нет `match`-выражений
 
 ```php
-// ❌ KPHP type inference issues with match
+// ❌ Проблемы вывода типов KPHP с match
 $status = match($attempts) { 0 => 'new', default => 'retry' };
 
 // ✅ if/elseif
@@ -115,57 +115,57 @@ if ($attempts === 0) {
 }
 ```
 
-### ❌ No trailing commas in function call arguments
+### ❌ Нет trailing comma в аргументах вызовов функций
 
 ```php
-// ❌ KPHP rejects trailing comma in calls
+// ❌ KPHP отклоняет trailing comma в вызовах
 foo($arg1, $arg2,);
 
 // ✅
 foo($arg1, $arg2);
 ```
 
-### ❌ No `__destruct()`
+### ❌ Нет `__destruct()`
 
-KPHP does not support `__destruct()`. Not used in this package.
+KPHP не поддерживает `__destruct()`. В этом пакете не используется.
 
-### ❌ No union types `int|string|bool|float|null`
+### ❌ Нет union-типов вида `int|string|bool|float|null`
 
-Complex union types (4+ members) cause KPHP type inference issues:
+Сложные union-типы (4+ члена) вызывают проблемы вывода типов KPHP:
 
 ```php
-// ❌ KPHP struggles with complex union return type
+// ❌ KPHP не справляется со сложным union return type
 public function getValue(): int|string|bool|float|null {}
 
-// ✅ Use mixed or split into specific methods
+// ✅ Используйте mixed или разделите на конкретные методы
 /** @return mixed */
 public function getValue(): mixed {}
 ```
 
-### ✅ `?int` nullable — supported
+### ✅ `?int` nullable — поддерживается
 
-Single nullable types (`?int`, `?string`, `?MyClass`) are fully supported.
+Одиночные nullable-типы (`?int`, `?string`, `?MyClass`) полностью поддерживаются.
 
-### ✅ `?? null` pattern for array access
+### ✅ Паттерн `?? null` для доступа к массиву
 
-KPHP does not narrow types after `!isset() + throw`. Use `?? null` + explicit check:
+KPHP не сужает тип после `!isset() + throw`. Используйте `?? null` + явную проверку:
 
 ```php
-// ❌ KPHP doesn't narrow type after !isset
+// ❌ KPHP не сужает тип после !isset
 if (!isset($row['id'])) { throw new Exception(); }
-$id = $row['id']; // KPHP: type still includes null
+$id = $row['id']; // KPHP: тип всё ещё включает null
 
-// ✅ KPHP understands this pattern
+// ✅ KPHP понимает этот паттерн
 $idRaw = $row['id'] ?? null;
 if ($idRaw === null) { throw new Exception(); }
-$id = (string) $idRaw; // clearly non-null
+$id = (string) $idRaw; // явно не null
 ```
 
 ---
 
 ## KPHP Entrypoint
 
-KPHP does not support Composer autoloading. All files must be included explicitly:
+KPHP не поддерживает Composer autoloading. Все файлы должны быть подключены явно:
 
 ```php
 // build/kphp-entrypoint.php
@@ -185,24 +185,23 @@ require_once __DIR__ . '/../src/Driver/DbQueue.php';
 require_once __DIR__ . '/../src/Driver/RedisQueue.php';
 ```
 
-**Order matters:** interfaces and exceptions before the classes that use them.
+**Порядок важен:** интерфейсы и исключения — до классов, которые их используют.
 
 ---
 
-## Verifying Compilation
+## Проверка компиляции
 
 ```bash
-# Build KPHP binary + PHAR (both must succeed)
+# Собрать KPHP binary + PHAR (оба должны завершиться успешно)
 make kphp-check
-# or
+# или
 docker build -f Dockerfile.check -t lphenom-queue-check .
 ```
 
 ---
 
-## Links
+## Ссылки
 
 - [KPHP vs PHP differences](https://vkcom.github.io/kphp/kphp-language/kphp-vs-php/whats-the-difference.html)
 - [vkcom/kphp Docker image](https://hub.docker.com/r/vkcom/kphp)
-- [lphenom/core — full KPHP guide](https://github.com/lphenom/core/blob/main/docs/kphp-compatibility.md)
-
+- [lphenom/core — полное руководство KPHP](https://github.com/lphenom/core/blob/main/docs/kphp-compatibility.md)

@@ -1,41 +1,42 @@
 # lphenom/queue
 
-**LPhenom Queue** — KPHP-compatible queue package for the LPhenom framework.
+**LPhenom Queue** — KPHP-совместимый пакет очередей для фреймворка LPhenom.
 
-Provides Job DTO, queue interface, DB queue driver (shared hosting), Redis queue driver (production), and retry policy with exponential backoff.
+Предоставляет Job DTO, интерфейс очереди, драйвер DB (shared hosting), драйвер Redis (production)
+и политику повторных попыток с экспоненциальной задержкой.
 
-## Features
+## Возможности
 
-- ✅ **DB queue** (`DbQueue`) — works on any shared hosting with MySQL
-- ✅ **Redis queue** (`RedisQueue`) — high-performance reactive consumption via BLPOP
-- ✅ **Identical interface** — swap drivers without changing business logic
-- ✅ **Exponential backoff** retry policy with configurable max attempts
-- ✅ **KPHP-compatible** — compiles to a static binary via `vkcom/kphp`
-- ✅ **PHP 8.1+** minimum requirement
+- ✅ **DB-очередь** (`DbQueue`) — работает на любом shared hosting с MySQL
+- ✅ **Redis-очередь** (`RedisQueue`) — высокопроизводительное реактивное потребление через BLPOP
+- ✅ **Единый интерфейс** — смена драйвера без изменения бизнес-логики
+- ✅ **Экспоненциальный backoff** — настраиваемое максимальное число попыток
+- ✅ **KPHP-совместимость** — компилируется в статический бинарь через `vkcom/kphp`
+- ✅ **PHP 8.1+** — минимальная требуемая версия
 
-## Installation
+## Установка
 
 ```bash
 composer require lphenom/queue
 ```
 
-## Quick Start
+## Быстрый старт
 
-### 1. Create a Job
+### 1. Создание задачи (Job)
 
 ```php
 use LPhenom\Queue\Job;
 
-// Create a job scheduled to run immediately
-$job = Job::create('send_email', json_encode(['to' => 'user@example.com', 'subject' => 'Hello']));
+// Создать задачу для немедленного выполнения
+$job = Job::create('send_email', json_encode(['to' => 'user@example.com', 'subject' => 'Привет']));
 
-// Schedule a job in the future (Unix timestamp)
+// Создать задачу с отсрочкой (Unix timestamp)
 $delayed = Job::create('generate_report', json_encode(['month' => '2026-03']), time() + 3600);
 ```
 
-### 2. Configure the Driver
+### 2. Настройка драйвера
 
-#### DB Queue (Shared Hosting)
+#### DB-очередь (Shared Hosting)
 
 ```php
 use LPhenom\Db\Driver\PdoMySqlConnection;
@@ -45,17 +46,17 @@ use LPhenom\Queue\Retry\RetryPolicy;
 
 $connection = new PdoMySqlConnection('mysql:host=localhost;dbname=mydb', 'user', 'pass');
 
-// Create the table once (e.g. in a migration)
+// Создать таблицу один раз (например, в миграции)
 $connection->execute(DbSchema::createTable('jobs'));
 
 $queue = new DbQueue(
     $connection,
     'jobs',
-    new RetryPolicy(maxAttempts: 3, baseDelaySeconds: 2)
+    new RetryPolicy(3, 2)
 );
 ```
 
-#### Redis Queue (Production / KPHP)
+#### Redis-очередь (Production / KPHP)
 
 ```php
 use LPhenom\Redis\Client\RespRedisClient;
@@ -63,21 +64,21 @@ use LPhenom\Redis\Connection\RedisConnectionConfig;
 use LPhenom\Queue\Driver\RedisQueue;
 use LPhenom\Queue\Retry\RetryPolicy;
 
-$config = new RedisConnectionConfig(host: 'localhost', port: 6379);
+$config = new RedisConnectionConfig('localhost', 6379);
 $client = new RespRedisClient($config);
 
 $queue = new RedisQueue(
     $client,
     'queue:default',
-    new RetryPolicy(maxAttempts: 5, baseDelaySeconds: 1)
+    new RetryPolicy(5, 1)
 );
 ```
 
 ---
 
-## Producer / Consumer Pattern
+## Паттерн «Продюсер / Консьюмер»
 
-### Producer — отправка задачи в очередь
+### Продюсер — отправка задачи в очередь
 
 Продюсер создаёт `Job` и вызывает `push()`. Одинаково для DB и Redis:
 
@@ -88,7 +89,7 @@ $job = Job::create('send_email', json_encode(['to' => 'user@example.com']));
 $queue->push($job);
 ```
 
-### Consumer — обработка задач через Worker
+### Консьюмер — обработка задач через Worker
 
 Консьюмер реализует `JobHandlerInterface` для каждого типа задачи и запускает `Worker`:
 
@@ -97,15 +98,15 @@ use LPhenom\Queue\Job;
 use LPhenom\Queue\JobHandlerInterface;
 use LPhenom\Queue\Worker;
 
-// 1. Реализуй обработчик для каждого типа джоба
+// 1. Реализовать обработчик для каждого типа джоба
 final class SendEmailHandler implements JobHandlerInterface
 {
     public function handle(Job $job): void
     {
         $payload = json_decode($job->getPayloadJson(), true);
         $to = is_array($payload) ? (string)($payload['to'] ?? '') : '';
-        // ... отправь письмо ...
-        echo 'Email sent to: ' . $to . PHP_EOL;
+        // ... отправить письмо ...
+        echo 'Email отправлен на: ' . $to . PHP_EOL;
     }
 }
 
@@ -113,23 +114,23 @@ final class GenerateReportHandler implements JobHandlerInterface
 {
     public function handle(Job $job): void
     {
-        // ... генерируй отчёт ...
+        // ... генерировать отчёт ...
     }
 }
 
-// 2. Собери Worker
+// 2. Собрать Worker
 $worker = new Worker($queue);
-$worker->register('send_email',    new SendEmailHandler());
+$worker->register('send_email',      new SendEmailHandler());
 $worker->register('generate_report', new GenerateReportHandler());
 
-// 3. Запусти consumer-loop
+// 3. Запустить цикл консьюмера
 $worker->run();  // блокирует навсегда (Redis BLPOP) или поллит (DB)
 ```
 
-### Dispatch flow
+### Схема диспетчеризации
 
 ```
-Producer                 Queue (Redis/DB)          Consumer (Worker)
+Продюсер               Очередь (Redis/DB)         Консьюмер (Worker)
    │                          │                          │
    │  push(Job('send_email')) │                          │
    │─────────────────────────>│                          │
@@ -139,19 +140,19 @@ Producer                 Queue (Redis/DB)          Consumer (Worker)
    │                          │   Job('send_email')      │
    │                          │─────────────────────────>│
    │                          │                          │
-   │                          │          handler->handle(job)
+   │                          │       handler->handle(job)
    │                          │                          │
-   │                          │   ack(job)  [success]    │
+   │                          │   ack(job)  [успех]      │
    │                          │<─────────────────────────│
-   │                          │          OR              │
-   │                          │   fail(job) [exception]  │
+   │                          │          ИЛИ             │
+   │                          │   fail(job) [ошибка]     │
    │                          │<─────────────────────────│
-   │                          │   (retry policy applied) │
+   │                          │   (применяется RetryPolicy)│
 ```
 
 ### Режим cron (DbQueue — shared hosting)
 
-`DbQueue::reserve()` не блокирует. Для DB-очереди запускай `runOnce()` из cron:
+`DbQueue::reserve()` не блокирует. Для DB-очереди запускай `run()` из cron:
 
 ```php
 // worker-cron.php — запускается каждую минуту через cron
@@ -166,10 +167,10 @@ $worker->run(0, 10);
 * * * * * php /app/worker-cron.php
 ```
 
-### Режим daemon (RedisQueue — KPHP / production)
+### Режим демона (RedisQueue — KPHP / production)
 
-`RedisQueue::reserve()` использует **BLPOP** — блокирует до появления задачи.
-Запускай как долгоживущий процесс:
+`RedisQueue::reserve()` использует **BLPOP** — блокируется до появления задачи.
+Запускается как долгоживущий процесс:
 
 ```php
 // worker.php — запускается как systemd/supervisor сервис
@@ -178,20 +179,20 @@ $worker->register('send_email',      new SendEmailHandler());
 $worker->register('generate_report', new GenerateReportHandler());
 
 // Блокирует и обрабатывает задачи реактивно (без поллинга)
-// Перезапускается через supervisor после каждых 1000 задач (ограничение памяти)
+// Перезапускается supervisor-ом после каждых 1000 задач
 $worker->run(5, 1000);
 ```
 
-### Что происходит при ошибке в handler
+### Что происходит при ошибке в обработчике
 
 Если `handle()` выбросит исключение:
 1. `Worker` перехватывает его
 2. Вызывается `$queue->fail($job, $exception->getMessage())`
 3. Драйвер применяет `RetryPolicy`:
-   - если `attempts < maxAttempts` → джоб возвращается в очередь с задержкой (exponential backoff)
+   - если `attempts < maxAttempts` → джоб возвращается в очередь с задержкой (экспоненциальный backoff)
    - если `attempts >= maxAttempts` → джоб удаляется навсегда
 
-Если для `job.name` не зарегистрирован handler → `fail()` вызывается сразу (без повторов).
+Если для `job.name` не зарегистрирован обработчик → `fail()` вызывается сразу (без повторов).
 
 ---
 
@@ -207,12 +208,12 @@ interface QueueInterface
 }
 ```
 
-| Method | Description |
-|--------|-------------|
-| `push()` | Add a job to the queue |
-| `reserve()` | Get the next available job (blocks for Redis, polls for DB) |
-| `ack()` | Mark job as successfully completed (removes from queue) |
-| `fail()` | Mark job as failed — applies retry policy |
+| Метод | Описание |
+|-------|----------|
+| `push()` | Добавить задачу в очередь |
+| `reserve()` | Получить следующую доступную задачу (блокирует для Redis, поллит для DB) |
+| `ack()` | Отметить задачу как успешно выполненную (удаляет из очереди) |
+| `fail()` | Отметить задачу как проваленную — применяет политику повторов |
 
 ## Job DTO
 
@@ -224,49 +225,49 @@ final class Job
     public function getPayloadJson(): string;
     public function getAttempts(): int;
     public function getAvailableAt(): int;     // Unix timestamp
-    public function getReservedAt(): ?int;     // null if not reserved
+    public function getReservedAt(): ?int;     // null — если не зарезервирован
 
-    // Immutable modifiers
+    // Иммутабельные модификаторы
     public function withAttempts(int $attempts): self;
     public function withAvailableAt(int $availableAt): self;
     public function withReservedAt(?int $reservedAt): self;
 }
 ```
 
-## Retry Policy
+## Политика повторных попыток (RetryPolicy)
 
 ```php
 use LPhenom\Queue\Retry\RetryPolicy;
 
 $policy = new RetryPolicy(
-    maxAttempts: 3,       // default: 3
-    baseDelaySeconds: 1   // default: 1
+    3,  // maxAttempts: максимальное число попыток (по умолчанию: 3)
+    1   // baseDelaySeconds: базовая задержка в секундах (по умолчанию: 1)
 );
 
-// Exponential backoff delays:
-// attempt 0 → 1s
-// attempt 1 → 2s
-// attempt 2 → 4s
-// attempt 3 → 8s
+// Задержки экспоненциального backoff:
+// попытка 0 → 1с
+// попытка 1 → 2с
+// попытка 2 → 4с
+// попытка 3 → 8с
 ```
 
-The `fail()` method in both drivers automatically applies the retry policy:
-- If `job.attempts < maxAttempts`: re-queue with incremented attempts and delayed `available_at`
-- If `job.attempts >= maxAttempts`: permanently remove from queue
+Метод `fail()` в обоих драйверах автоматически применяет политику повторов:
+- если `job.attempts < maxAttempts`: повторно ставит в очередь с увеличенным счётчиком и задержкой `available_at`
+- если `job.attempts >= maxAttempts`: окончательно удаляет задачу из очереди
 
-## Database Schema
+## Схема базы данных
 
 ```php
 use LPhenom\Queue\Driver\Schema\DbSchema;
 
-// Get CREATE TABLE SQL
+// Получить SQL CREATE TABLE
 echo DbSchema::createTable('jobs');
 
-// Get DROP TABLE SQL
+// Получить SQL DROP TABLE
 echo DbSchema::dropTable('jobs');
 ```
 
-Schema:
+Схема:
 
 ```sql
 CREATE TABLE IF NOT EXISTS `jobs` (
@@ -281,38 +282,37 @@ CREATE TABLE IF NOT EXISTS `jobs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-## Driver Comparison
+## Сравнение драйверов
 
-| Feature | DbQueue | RedisQueue |
-|---------|---------|------------|
-| Storage | MySQL table | Redis list |
-| Consumption | Polling (cron) | Blocking (BLPOP) |
-| Shared hosting | ✅ | ❌ requires Redis |
-| High throughput | ❌ | ✅ |
-| `reserve()` blocking | ❌ (returns null) | ✅ (blocks up to timeout) |
+| Характеристика | DbQueue | RedisQueue |
+|----------------|---------|------------|
+| Хранилище | Таблица MySQL | Список Redis |
+| Потребление | Поллинг (cron) | Блокирующий (BLPOP) |
+| Shared hosting | ✅ | ❌ требует Redis |
+| Высокая нагрузка | ❌ | ✅ |
+| Блокирующий `reserve()` | ❌ (возвращает null) | ✅ (блокирует до timeout) |
 | Retry backoff | ✅ | ✅ |
 
-## KPHP Compatibility
+## Совместимость с KPHP
 
-See [docs/kphp-compatibility.md](kphp-compatibility.md) for full rules.
+См. [docs/kphp-compatibility.md](kphp-compatibility.md) для полного описания правил.
 
-Key constraints applied in this package:
-- No `str_starts_with/ends_with/contains` → `strpos()`/`substr()`
-- No `JSON_THROW_ON_ERROR` → explicit `=== false` / `is_array()` checks
-- No `readonly` / constructor property promotion
-- No `match` expressions
-- No trailing commas in function call arguments
-- No `__destruct()`
-- Integer math instead of `pow()` for exponential backoff
+Ключевые ограничения этого пакета:
+- Нет `str_starts_with/ends_with/contains` → используем `strpos()`/`substr()`
+- Нет `JSON_THROW_ON_ERROR` → явные проверки `=== false` / `is_array()`
+- Нет `readonly` / constructor property promotion
+- Нет `match`-выражений
+- Нет trailing comma в аргументах вызовов функций
+- Нет `__destruct()`
+- Целочисленная математика вместо `pow()` для экспоненциального backoff
 
-## Development
+## Разработка
 
 ```bash
-make up         # Start MySQL + Redis
-make install    # Install composer dependencies
-make test       # Run tests
-make lint       # Check code style
-make analyse    # PHPStan static analysis
-make kphp-check # KPHP binary + PHAR verification
+make up         # Запустить MySQL + Redis
+make install    # Установить зависимости composer
+make test       # Запустить тесты
+make lint       # Проверить стиль кода
+make analyse    # Статический анализ PHPStan
+make kphp-check # Проверка KPHP binary + PHAR
 ```
-

@@ -1,21 +1,22 @@
 # lphenom/queue
 
-**LPhenom Queue** — KPHP-compatible queue package for the LPhenom framework.
+**LPhenom Queue** — KPHP-совместимый пакет очередей для фреймворка LPhenom.
 
-Provides a unified `QueueInterface` with DB (shared hosting) and Redis (production) drivers, exponential backoff retry policy, and full KPHP support.
+Предоставляет единый интерфейс `QueueInterface` с драйверами для БД (shared hosting) и Redis (production),
+политику повторных попыток с экспоненциальной задержкой и полную поддержку KPHP.
 
-## Documentation
+## Документация
 
-- [docs/queue.md](docs/queue.md) — Usage guide
-- [docs/kphp-compatibility.md](docs/kphp-compatibility.md) — KPHP constraints
+- [docs/queue.md](docs/queue.md) — Руководство по использованию
+- [docs/kphp-compatibility.md](docs/kphp-compatibility.md) — Ограничения KPHP
 
-## Quick Start
+## Быстрый старт
 
 ```bash
 composer require lphenom/queue
 make up && make test
 ```
 
-## License
+## Лицензия
 
-MIT — see [LICENSE](LICENSE)
+MIT — см. [LICENSE](LICENSE)
